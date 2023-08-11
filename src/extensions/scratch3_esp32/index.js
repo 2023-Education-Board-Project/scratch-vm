@@ -23,14 +23,14 @@ const blockIconURI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAYA
 const BLECommand = {
     CMD_PIN_CONFIG: 0x80,
     CMD_DISPLAY_TEXT: 0x81,
-    CMD_DISPLAY_LED: 0x82
+    CMD_TASK: 0x83
 };
 
 /**
  * A time interval to wait (in milliseconds) before reporting to the BLE socket
  * that data has stopped coming from the peripheral.
  */
-const BLETimeout = 4500;
+const BLETimeout = 2000;
 
 /**
  * A time interval to wait (in milliseconds) while a block that sends a BLE message is running.
@@ -87,6 +87,16 @@ class Esp32 {
          * The id of the extension this peripheral belongs to.
          */
         this._extensionId = extensionId;
+
+        /**
+         * The most recently received value for each gesture.
+         * @type {Object.<string, Object>}
+         * @private
+         */
+        this._sensors = {
+            GPIOPins: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        }
 
 		/**
          * Interval ID for data reading timeout.
@@ -238,22 +248,15 @@ class Esp32 {
      */
     _onMessage (base64) {
         // parse data
+        // 0x 0000 0000 0000 0000
         const data = Base64Util.base64ToUint8Array(base64);
-		/*
-        this._sensors.tiltX = data[1] | (data[0] << 8);
-        if (this._sensors.tiltX > (1 << 15)) this._sensors.tiltX -= (1 << 16);
-        this._sensors.tiltY = data[3] | (data[2] << 8);
-        if (this._sensors.tiltY > (1 << 15)) this._sensors.tiltY -= (1 << 16);
 
-        this._sensors.buttonA = data[4];
-        this._sensors.buttonB = data[5];
-
-        this._sensors.touchPins[0] = data[6];
-        this._sensors.touchPins[1] = data[7];
-        this._sensors.touchPins[2] = data[8];
-
-        this._sensors.gestureState = data[9];
-		*/
+        for (var i = 0; i < data.length; i++) {
+            for (var j = 0; j < 8; j++) {
+                this._sensors.GPIOPins[i + j] = data[i] & (1 << (8 - j));
+            }
+        }
+        
         // cancel disconnect timeout and start a new one
         window.clearTimeout(this._timeoutID);
         this._timeoutID = window.setTimeout(
@@ -269,8 +272,8 @@ class Esp32 {
  * @enum {string}
  */
 const Esp32PinState = {
-    ON: 'on',
-    OFF: 'off'
+    PUSH: 'push',
+    PULL: 'pull'
 };
 
 /**
@@ -299,25 +302,25 @@ class Scratch3Esp32Blocks {
         return [
             {
                 text: formatMessage({
-                    id: 'esp32.pinStateMenu.on',
-                    default: 'on',
+                    id: 'esp32.pinStateMenu.push',
+                    default: 'push',
                     description: 'label for on element in pin state picker for esp32 extension'
                 }),
-                value: Esp32PinState.ON
+                value: Esp32PinState.PUSH
             },
             {
                 text: formatMessage({
-                    id: 'esp32.pinStateMenu.off',
-                    default: 'off',
+                    id: 'esp32.pinStateMenu.pull',
+                    default: 'pull',
                     description: 'label for off element in pin state picker for esp32 extension'
                 }),
-                value: Esp32PinState.OFF
+                value: Esp32PinState.PULL
             }
         ];
     }
 	
 	/**
-     * Construct a set of MicroBit blocks.
+     * Construct a set of Esp32 blocks.
      * @param {Runtime} runtime - the Scratch 3.0 runtime.
      */
     constructor (runtime) {
@@ -327,7 +330,7 @@ class Scratch3Esp32Blocks {
          */
         this.runtime = runtime;
 
-        // Create a new MicroBit peripheral instance
+        // Create a new Esp32 peripheral instance
         this._peripheral = new Esp32(this.runtime, Scratch3Esp32Blocks.EXTENSION_ID);
     }
 
@@ -346,14 +349,14 @@ class Scratch3Esp32Blocks {
 					text: formatMessage({
 						id: 'esp32.displayText',
 						default: 'display text [TEXT]',
-						description: 'display text on esp32 board display'
+						description: 'display text on esp32 board sh1107 display'
 					}),
 					blockType: BlockType.COMMAND,
 					arguments: {
 						TEXT: {
 							type: ArgumentType.STRING,
 							defaultValue: formatMessage({
-								id: 'esp32.defaultTExtToDisplay',
+								id: 'esp32.defaultTextToDisplay',
 								default: 'Hello world!',
 								description: 'display text by i2c'
 							})
@@ -363,12 +366,55 @@ class Scratch3Esp32Blocks {
 				{
 					opcode: 'displayClear',
 					text: formatMessage({
-						id: 'esp32.clearDisplay',
+						id: 'esp32.DisplayClear',
 						default: 'clear display',
 						description: 'clear esp32 display'
 					}),
 					blockType: BlockType.COMMAND
-				}
+				},
+                {
+                    opcode: 'init_GPIO_Pin',
+                    text: formatMessage ({
+                        id: 'esp32.initGPIOPin',
+                        default: 'init gpio pin [PINNUM] [PINSTATE]',
+                        description: 'turn gpio pin push/pull'
+                    }),
+                    blockType: BlockType.COMMAND,
+                    arguments : {
+                        PINNUM: {
+                            type: ArgumentType.NUMBER,
+                            defaultValue: formatMessage({
+                                id: 'esp32.defaultPinNUM',
+                                default: '25',
+                                description: 'GPIO Pin Number'
+                            })
+                        },
+                        PINSTATE: {
+                            type: ArgumentType.STRING,
+                            menu: 'pinState',
+                            defaultValue: formatMessage({
+                                id: 'esp32.defaultPinState',
+                                default: Esp32PinState.PUSH,
+                                description: 'GPIO Pin State'
+                            })
+                        }
+                    }
+                },
+                {
+                    opcode: 'isPinOn',
+                    text: formatMessage({
+                        id: 'esp32.isPinOn',
+                        default: '[PIN] Pin On?',
+                        description: 'is Pin on?'
+                    }),
+                    blockType: BlockType.BOOLEAN,
+                    arguments : {
+                        PINNUM : {
+                            type: ArgumentType.NUMBER,
+                            defaultValue: '25',
+                        }
+                    }
+                }
 			],
 			menus: {
 				pinState: {
@@ -386,7 +432,8 @@ class Scratch3Esp32Blocks {
 	 */
 	displayText (args) {
         const text = String(args.TEXT).substring(0, 19);
-        if (text.length > 0) this._peripheral.displayText(text);
+        if (text.length > 0)
+            this._peripheral.displayText(text);
         const yieldDelay = 120 * ((6 * text.length) + 6);
 
         return new Promise(resolve => {
