@@ -41,7 +41,7 @@ const PramFunc = {
  * A time interval to wait (in milliseconds) before reporting to the BLE socket
  * that data has stopped coming from the peripheral.
  */
-const BLETimeout = 4500;
+const BLETimeout = 2000;
 
 /**
  * A time interval to wait (in milliseconds) while a block that sends a BLE message is running.
@@ -98,6 +98,16 @@ class Esp32 {
          * The id of the extension this peripheral belongs to.
          */
         this._extensionId = extensionId;
+
+        /**
+         * The most recently received value for each gesture.
+         * @type {Object.<string, Object>}
+         * @private
+         */
+        this._sensors = {
+            GPIOPins: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        }
 
 		/**
          * Interval ID for data reading timeout.
@@ -285,22 +295,15 @@ class Esp32 {
      */
     _onMessage (base64) {
         // parse data
+        // 0x 0000 0000 0000 0000
         const data = Base64Util.base64ToUint8Array(base64);
-		/*
-        this._sensors.tiltX = data[1] | (data[0] << 8);
-        if (this._sensors.tiltX > (1 << 15)) this._sensors.tiltX -= (1 << 16);
-        this._sensors.tiltY = data[3] | (data[2] << 8);
-        if (this._sensors.tiltY > (1 << 15)) this._sensors.tiltY -= (1 << 16);
 
-        this._sensors.buttonA = data[4];
-        this._sensors.buttonB = data[5];
-
-        this._sensors.touchPins[0] = data[6];
-        this._sensors.touchPins[1] = data[7];
-        this._sensors.touchPins[2] = data[8];
-
-        this._sensors.gestureState = data[9];
-		*/
+        for (var i = 0; i < data.length; i++) {
+            for (var j = 0; j < 8; j++) {
+                this._sensors.GPIOPins[i + j] = data[i] & (1 << (8 - j));
+            }
+        }
+        
         // cancel disconnect timeout and start a new one
         window.clearTimeout(this._timeoutID);
         this._timeoutID = window.setTimeout(
@@ -353,8 +356,8 @@ class Esp32 {
  * @enum {string}
  */
 const Esp32PinState = {
-    ON: 'on',
-    OFF: 'off'
+    PUSH: 'push',
+    PULL: 'pull'
 };
 
 /**
@@ -383,25 +386,25 @@ class Scratch3Esp32Blocks {
         return [
             {
                 text: formatMessage({
-                    id: 'esp32.pinStateMenu.on',
-                    default: 'on',
+                    id: 'esp32.pinStateMenu.push',
+                    default: 'push',
                     description: 'label for on element in pin state picker for esp32 extension'
                 }),
-                value: Esp32PinState.ON
+                value: Esp32PinState.PUSH
             },
             {
                 text: formatMessage({
-                    id: 'esp32.pinStateMenu.off',
-                    default: 'off',
+                    id: 'esp32.pinStateMenu.pull',
+                    default: 'pull',
                     description: 'label for off element in pin state picker for esp32 extension'
                 }),
-                value: Esp32PinState.OFF
+                value: Esp32PinState.PULL
             }
         ];
     }
 	
 	/**
-     * Construct a set of MicroBit blocks.
+     * Construct a set of Esp32 blocks.
      * @param {Runtime} runtime - the Scratch 3.0 runtime.
      */
     constructor (runtime) {
@@ -411,7 +414,7 @@ class Scratch3Esp32Blocks {
          */
         this.runtime = runtime;
 
-        // Create a new MicroBit peripheral instance
+        // Create a new Esp32 peripheral instance
         this._peripheral = new Esp32(this.runtime, Scratch3Esp32Blocks.EXTENSION_ID);
     }
 
@@ -430,7 +433,7 @@ class Scratch3Esp32Blocks {
 					text: formatMessage({
 						id: 'esp32.displayText',
 						default: 'display text [TEXT]',
-						description: 'display text on esp32 board display'
+						description: 'display text on esp32 board sh1107 display'
 					}),
 					blockType: BlockType.REPORTER,
 					arguments: {
@@ -447,7 +450,7 @@ class Scratch3Esp32Blocks {
 				{
 					opcode: 'displayClear',
 					text: formatMessage({
-						id: 'esp32.clearDisplay',
+						id: 'esp32.DisplayClear',
 						default: 'clear display',
 						description: 'clear esp32 display'
 					}),
